@@ -1,5 +1,7 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 const int SCREEN_WIDTH = 64;
 const int SCREEN_HEIGHT = 32;
@@ -40,8 +42,10 @@ unsigned char chip8_fontset[] =
 };
 
 void initialize(Chip8* chip);
-int loadProgram(char* name, Chip8 chip);
+int loadProgram(char* name, Chip8* chip);
 void emulateCycle(Chip8* chip);
+
+void clear_screen(void);
 
 int main(int argc, char* argv[])
 {
@@ -53,7 +57,7 @@ int main(int argc, char* argv[])
 
     // Initialize the Chip8 system and load the game into the memory
     initialize(&chip);
-    if (loadProgram("pong", chip) == -1)
+    if (loadProgram("pong", &chip) == -1)
     {
         return -1;
     }
@@ -136,11 +140,14 @@ void emulateCycle(Chip8* chip)
         case 0x0000:
             switch (chip->opcode & 0x000F)
             {
-                case 0x0000: // 0x00E0: Clears the screen
-                    // Execute opcode
+                case 0x0000: // 0x00E0
+                    // Clears the screen
+                    clear_screen();
+                    chip->pc += 2;
                     break;
-                case 0x000E: // 0x00EE: Returns from subroutine
-                    // Execute opcode
+                case 0x000E: // 0x00EE
+                    // Returns from subroutine
+                    chip->pc = chip->stack[chip->sp];
                     break;
                 // 0x0NNN
                 default:
@@ -149,6 +156,7 @@ void emulateCycle(Chip8* chip)
             break;
         case 0x1000: // 0x1NNN
             // jump to address NNN
+            chip->pc = chip->opcode & 0x0FFF;
             break;
         case 0x2000: // 0x2NNN: calls subroutine at address NNN
             chip->stack[chip->sp] = chip->pc;
@@ -157,39 +165,103 @@ void emulateCycle(Chip8* chip)
             break;
         case 0x3000: // 0x3XNN
             // skip the next instruction if VX == NN
+            if (chip->V[chip->opcode & 0x0F00 >> 8] == chip->opcode & 0x00FF)
+                chip->pc += 4;
+            else
+                chip->pc += 2;
             break;
         case 0x4000: // 0x4XNN
             // skip next instruction if VX != NN
+            if (chip->V[chip->opcode & 0x0F00 >> 8] != chip->opcode & 0x00FF)
+                chip->pc += 4;
+            else
+                chip->pc += 2;
             break;
         case 0x5000: // 0x5XY0
             // skip next instruction if VX == VY
+            if (chip->V[chip->opcode & 0x0F00 >> 8] == chip->V[chip->opcode & 0x00F0 >> 4])
+                chip->pc += 4;
+            else
+                chip->pc += 2;
             break;
         case 0x6000: // 0x6XNN
             // set VX to NN
+            chip->V[chip->opcode & 0x0F00 >> 8] = chip->opcode & 0x00FF;
+            chip->pc += 2;
             break;
         case 0x7000: // 0x7XNN
             // Add NN to VX (carry flag not changed)
+            chip->V[chip->opcode & 0x0F00 >> 8] += chip->opcode & 0x00FF;
+            chip->pc += 2;
             break;
         case 0x8000:
             switch (chip->opcode & 0x000F)
             {
-                case 0x0:
+                case 0x0000: // 0x8XY0
+                    // set VX to VY
+                    chip->V[chip->opcode & 0x0F00 >> 8] = chip->V[chip->opcode & 0x00F0 >> 4];
+                    chip->pc += 2;
                     break;
-                case 0x1:
+                case 0x0001: // 0x8XY1
+                    // sets VX to (VX | VY)
+                    chip->V[chip->opcode & 0x0F00 >> 8] |= chip->V[chip->opcode & 0x00F0 >> 4];
+                    chip->pc += 2;
                     break;
-                case 0x2:
+                case 0x0002: // 0x8XY2
+                    // sets VX to (VX & VY)
+                    chip->V[chip->opcode & 0x0F00 >> 8] &= chip->V[chip->opcode & 0x00F0 >> 4];
+                    chip->pc += 2;
                     break;
-                case 0x3:
+                case 0x0003: // 0x8XY3
+                    // sets VX to (VX xor VY)
+                    chip->V[chip->opcode & 0x0F00 >> 8] ^= chip->V[chip->opcode & 0x00F0 >> 4];
+                    chip->pc += 2;
                     break;
-                case 0x4:
+                case 0x0004: // 0x8XY4
+                    // add VY to VX when there's no overflow
+                    if (chip->V[chip->opcode & 0x00F0 >> 4] > (0xFF - chip->V[(chip->opcode & 0xF00) >> 8]))
+                        chip->V[0xF] = 1;
+                    else
+                        chip->V[0xF] = 0;
+                    chip->V[(chip->opcode & 0x0F00) >> 8] += chip->V[(chip->opcode & 0x00F0) >> 4];
+                    chip->pc += 2;
                     break;
-                case 0x5:
+                case 0x0005: // 0x8XY5
+                    // VY subtracted from VX; VF set 0 when underflow, 1 when there is not
+                    if (chip->V[chip->opcode & 0x0F00 >> 8] >= chip->V[chip->opcode & 0x00F0 >> 4])
+                        chip->V[0xF] = 1;
+                    else
+                        chip->V[0xF] = 0;
+                    
+                    chip->V[chip->opcode & 0x00F0 >> 4] -= chip->V[chip->opcode & 0x0F00 >> 8];
+                    
+                    chip->pc += 2;
                     break;
-                case 0x6:
+                case 0x0006: // 0x8XY6
+                    // store least sig bit of VX in VF
+                    chip->V[0xF] = (chip->V[chip->opcode & 0x0F00 >> 8]) & 0x0001; 
+                    // right shifts VX by 1
+                    chip->V[chip->opcode & 0x0F00 >> 8] >>= 1;
+                    chip->pc += 2;
                     break;
-                case 0x7:
+                case 0x0007: // 0x8XY7
+                    // VF = 0 when underflow, 1 when not
+                    if (chip->V[chip->opcode & 0x00F0 >> 4] >= chip->V[chip->opcode & 0x00F0 >> 8])
+                        chip->V[0xF] = 1;
+                    else
+                        chip->V[0xF] = 0;
+                    // set VX = VY - VX
+                    chip->V[chip->opcode & 0x00F0 >> 8] = chip->V[chip->opcode & 0x00F0 >> 4] - chip->V[chip->opcode & 0x00F0 >> 8];
+                    chip->pc += 2;
                     break;
-                case 0xE:
+                case 0x000E: // 0x8XYE
+                    // VF = 1 if most sig bit of VX was set, other wise VF = 0
+                    chip->V[0xF] = chip->V[chip->opcode & 0x0F00 >> 8] & 0x1000;
+
+                    // left shift VX by 1
+                    chip->V[chip->opcode & 0x0F00 >> 8] <<= 1;
+
+                    chip->pc += 2;
                     break;
 
                 default:
@@ -197,31 +269,47 @@ void emulateCycle(Chip8* chip)
             }
             break;
         case 0x9000: // 0x9XY0
-            // skip next instruction if VX !- VY
+            // skip next instruction if VX != VY
+            if (chip->V[chip->opcode & 0x0F00 >> 8] != chip->V[chip->opcode & 0x00F0 >> 4])
+                chip->pc += 4;
+            else
+                chip->pc += 2;
             break;
         case 0xA000: // ANNN: Sets I to the address NNN
-            // Exectue opcode
             chip->I = chip->opcode & 0x0FFF;
             chip->pc += 2;
             break;
         case 0xB000: // 0xBNNN
-            // jump to address NNNN + V0
+            // jump to address NNN + V0
+            chip->pc = chip->V[0x0] + chip->opcode & 0x0FFF;
             break;
         case 0xC000: // 0xCXNN
             // set VX to the result of bitwise and operation on a random number and NNN
             // VX = rand() & NN
+            srand(time(NULL));
+
+            chip->V[chip->opcode & 0x0F00 >> 8] = rand() + (chip->opcode & 0x00FF);
+            chip->pc += 2;
             break;
-        case 0xD000: // 0xDYN
+        case 0xD000: // 0xDXYN
             // draw sprite at coordinate (Vx, Vy) with width and height of N pixels
             break;
         case 0xE000:
             switch (chip->opcode & 0x00FF)
             {
-                case 0x9E: // 0xEX9E
+                case 0x009E: // 0xEX9E
                     // skip next instruction if key in Vx is pressed
+                    if (chip->key[chip->V[(chip->opcode & 0x0F00) >> 8]] != 0)
+                        chip->pc += 4;
+                    else
+                        chip->pc += 2;
                     break;
-                case 0xA1: // EXA1
+                case 0x00A1: // EXA1
                     // skip next instruction if key in Vx is not pressed
+                    if (chip->key[chip->V[(chip->opcode & 0x0F00) >> 8]] == 0)
+                        chip->pc += 4;
+                    else
+                        chip->pc += 2;
                     break;
                 
                 default:
@@ -230,23 +318,52 @@ void emulateCycle(Chip8* chip)
         case 0xF000:
             switch (chip->opcode & 0x00FF)
             {
-                case 0x07:
+                case 0x0007: // 0xFX07
+                    // set VX to the value of the dealy timer
+                    chip->V[chip->opcode & 0x0F00 >> 8] = chip->delay_timer;
+                    chip->pc += 2;
                     break;
-                case 0x0A:
+                case 0x000A: // 0xFX0A
                     break;
-                case 0x15:
+                case 0x0015: // 0xFX15
+                    // set delay timer to VX
+                    chip->delay_timer = chip->V[chip->opcode & 0x0F00 >> 8];
+                    chip->pc += 2;
                     break;
-                case 0x18:
+                case 0x0018: // 0xFX18
+                    // set sound timer to VX
+                    chip->sound_timer = chip->V[chip->opcode & 0x0F00 >> 8];
+                    chip->pc += 2;
                     break;
-                case 0x1E:
+                case 0x001E: // 0xFX1E
+                    // add VX to I
+                    chip->I += chip->V[chip->opcode & 0x0F00 >> 8];
+                    chip->pc += 2;
                     break;
-                case 0x29:
+                case 0x0029: // 0xFX29
                     break;
-                case 0x33:
+                case 0x0033: // 0xFX33
+                    // store binary-coded decimal representation of VX
+                    chip->memory[chip->I] = chip->V[(chip->opcode & 0x0F00) >> 8] / 100; // hundreds digit
+                    chip->memory[chip->I + 1] = (chip->V[(chip->opcode & 0x0F00) >> 8] / 10) % 10; // tens digit
+                    chip->memory[chip->I + 2] = (chip->V[(chip->opcode & 0x0F00) >> 8] % 100) % 10; // ones digit
+                    chip->pc += 2;
                     break;
-                case 0x55:
+                case 0x0055: // 0xFX55
+                    // store V0 to VX in memory starting at address I
+                    for (int i = 0; i <= (chip->opcode & 0x0F00 >> 8); i++)
+                    {
+                        chip->memory[chip->I + i] = chip->V[i];
+                    }
+                    chip->pc += 2;
                     break;
-                case 0x65:
+                case 0x0065: // 0xFX65
+                    // fills from V0 to VX with values from memory starting at address I
+                    for (int i = 0; i <= (chip->opcode & 0x0F00 >> 8); i++)
+                    {
+                        chip->V[i] = chip->memory[chip->I + i];
+                    }
+                    chip->pc += 2;
                     break;
 
                 default:
@@ -267,4 +384,9 @@ void emulateCycle(Chip8* chip)
             printf("BEEP!\n");
         --chip->sound_timer;
     }
+}
+
+void clear_screen(void)
+{
+    printf("Cleared the screen\n");
 }
