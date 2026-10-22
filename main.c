@@ -47,6 +47,8 @@ void emulateCycle(Chip8* chip);
 
 void clear_screen(void);
 
+unsigned char get_key_press(void);
+
 int main(int argc, char* argv[])
 {
     Chip8 chip;
@@ -134,7 +136,7 @@ void emulateCycle(Chip8* chip)
     // Fetch Opcode
     chip->opcode = chip->memory[chip->pc] << 8 | chip->memory[chip->pc + 1];
 
-    // Decode Opcode
+    // Decode and Execute Opcode
     switch (chip->opcode & 0xF000)
     {
         case 0x0000:
@@ -324,6 +326,8 @@ void emulateCycle(Chip8* chip)
                     chip->pc += 2;
                     break;
                 case 0x000A: // 0xFX0A
+                    // wait for key press and store value in VX
+                    chip->V[chip->opcode & 0x0F00 >> 8] = get_key_pressed();
                     break;
                 case 0x0015: // 0xFX15
                     // set delay timer to VX
@@ -389,4 +393,11 @@ void emulateCycle(Chip8* chip)
 void clear_screen(void)
 {
     printf("Cleared the screen\n");
+}
+
+unsigned char get_key_press(void)
+{
+    printf("A key was pressed!\n");
+    unsigned char c = 'A';
+    return c;
 }
