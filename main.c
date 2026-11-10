@@ -1,51 +1,20 @@
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
+#include "chip.h"
+
 const int SCREEN_WIDTH = 64;
 const int SCREEN_HEIGHT = 32;
-
-typedef struct chip8
-{
-    unsigned short opcode;
-    unsigned char memory[4096];
-    unsigned char V[16];
-    unsigned short I;
-    unsigned short pc;
-    unsigned char gfx[64 * 32];
-    unsigned char delay_timer;
-    unsigned char sound_timer;
-    unsigned short stack[16];
-    unsigned short sp;
-    unsigned char key[16];
-} Chip8;
-
-unsigned char chip8_fontset[] =
-{
-    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-    0x20, 0x60, 0x20, 0x20, 0x70, // 1
-    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-    0xF0, 0x80, 0xF0, 0x80, 0x80  // F
-};
-
-void initialize(Chip8* chip);
-int loadProgram(char* name, Chip8* chip);
-void emulateCycle(Chip8* chip);
+const int SCALE = 10;
 
 void clear_screen(void);
+void setupGraphics(void);
+void setupInput(void);
+void setKeys(void);
 
 unsigned char get_key_press(void);
 
@@ -59,24 +28,53 @@ int main(int argc, char* argv[])
 
     // Initialize the Chip8 system and load the game into the memory
     initialize(&chip);
+
+    // load ROM file
     if (loadProgram("pong", &chip) == -1)
     {
         return -1;
     }
 
-    // Emulation loop
-    for(;;)
+    SDL_Window *window;
+    bool done = false;
+
+    SDL_Init(SDL_INIT_VIDEO);
+
+    window = SDL_CreateWindow("CHIP-8", SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE, SDL_WINDOW_OPENGL);
+
+    if (window == NULL) 
     {
-        // emulate one cycle
-        emulateCycle(&chip);
-
-        // if the draw flag is set, update the screen
-        // draw flag set by 0x00E0 and 0xDXYN
-
-        // store key press state (Press and Release)
-        setKeys();
+        SDL_LogError(SDL_LOG_CATEGORY_ERROR, "Could not create window: %s\n", SDL_GetError());
+        return 1;
     }
 
+    while (!done)
+    {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) 
+        {
+            if (event.type == SDL_EVENT_QUIT)
+            {
+                done = true;
+            }
+        }
+        // // Emulation loop
+        for(;;)
+        {
+            // emulate one cycle
+            emulateCycle(&chip);
+
+            // if the draw flag is set, update the screen
+            // draw flag set by 0x00E0 and 0xDXYN
+
+            // store key press state (Press and Release)
+            setKeys();
+        }
+    }
+
+    SDL_DestroyWindow(window);
+
+    SDL_Quit();
     return 0;
 }
 
@@ -87,7 +85,7 @@ void initialize(Chip8* chip)
     chip->I = 0;
     chip->sp = 0;
 
-    // TODO: Clear display
+    // Clear display
 
     // Clear stack
     for (int i = 0; i < 16; i++)
@@ -129,6 +127,7 @@ int loadProgram(char* name, Chip8* chip) {
         chip->memory[i + 512] = buffer[i];
 
     fclose(fptr);
+    return 0;
 }
 
 void emulateCycle(Chip8* chip)
@@ -167,14 +166,14 @@ void emulateCycle(Chip8* chip)
             break;
         case 0x3000: // 0x3XNN
             // skip the next instruction if VX == NN
-            if (chip->V[chip->opcode & 0x0F00 >> 8] == chip->opcode & 0x00FF)
+            if (chip->V[chip->opcode & 0x0F00 >> 8] == (chip->opcode & 0x00FF))
                 chip->pc += 4;
             else
                 chip->pc += 2;
             break;
         case 0x4000: // 0x4XNN
             // skip next instruction if VX != NN
-            if (chip->V[chip->opcode & 0x0F00 >> 8] != chip->opcode & 0x00FF)
+            if (chip->V[chip->opcode & 0x0F00 >> 8] != (chip->opcode & 0x00FF))
                 chip->pc += 4;
             else
                 chip->pc += 2;
@@ -188,12 +187,12 @@ void emulateCycle(Chip8* chip)
             break;
         case 0x6000: // 0x6XNN
             // set VX to NN
-            chip->V[chip->opcode & 0x0F00 >> 8] = chip->opcode & 0x00FF;
+            chip->V[chip->opcode & 0x0F00 >> 8] = (chip->opcode & 0x00FF);
             chip->pc += 2;
             break;
         case 0x7000: // 0x7XNN
             // Add NN to VX (carry flag not changed)
-            chip->V[chip->opcode & 0x0F00 >> 8] += chip->opcode & 0x00FF;
+            chip->V[chip->opcode & 0x0F00 >> 8] += (chip->opcode & 0x00FF);
             chip->pc += 2;
             break;
         case 0x8000:
@@ -278,12 +277,12 @@ void emulateCycle(Chip8* chip)
                 chip->pc += 2;
             break;
         case 0xA000: // ANNN: Sets I to the address NNN
-            chip->I = chip->opcode & 0x0FFF;
+            chip->I = (chip->opcode & 0x0FFF);
             chip->pc += 2;
             break;
         case 0xB000: // 0xBNNN
             // jump to address NNN + V0
-            chip->pc = chip->V[0x0] + chip->opcode & 0x0FFF;
+            chip->pc = chip->V[0x0] + (chip->opcode & 0x0FFF);
             break;
         case 0xC000: // 0xCXNN
             // set VX to the result of bitwise and operation on a random number and NNN
@@ -327,7 +326,7 @@ void emulateCycle(Chip8* chip)
                     break;
                 case 0x000A: // 0xFX0A
                     // wait for key press and store value in VX
-                    chip->V[chip->opcode & 0x0F00 >> 8] = get_key_pressed();
+                    chip->V[chip->opcode & 0x0F00 >> 8] = get_key_press();
                     break;
                 case 0x0015: // 0xFX15
                     // set delay timer to VX
@@ -393,6 +392,21 @@ void emulateCycle(Chip8* chip)
 void clear_screen(void)
 {
     printf("Cleared the screen\n");
+}
+
+void setupGraphics(void)
+{
+    printf("The graphics were set up\n");
+}
+
+void setupInput(void)
+{
+    printf("The input was set up\n");
+}
+
+void setKeys(void)
+{
+    printf("The keys were set up\n");
 }
 
 unsigned char get_key_press(void)

@@ -1,9 +1,9 @@
 CC = clang
-TARGET = main
+TARGET = chip8
 SRC = main.c
 
-CFLAGS = $(shell pkg-config --cflags sdl2)
-LDFLAGS = $(shell pkg-config --libs sdl2)
+CFLAGS = $(shell pkg-config --cflags sdl3)
+LDFLAGS = $(shell pkg-config --libs sdl3)
 
 $(TARGET): $(SRC)
 	$(CC) $(SRC) -o $(TARGET) $(CFLAGS) $(LDFLAGS)
